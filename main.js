@@ -17,6 +17,8 @@ let sequence    = [];
 let focusQuery  = 0;
 let focusKey    = 1;
 let activeHead  = 0;
+let blockCount  = 1;
+let viewBlock   = 0;
 let model       = null;
 let lastResult  = null;
 
@@ -29,6 +31,16 @@ let animSpeed    = 1;        // multiplier
 // matmul step state
 let mmRow       = 0;
 let mmAutoTimer = null;
+
+// multi-block stage state
+let stagePlaying   = false;
+let stageProgress  = 0;
+let stageRafId     = null;
+let stageLastTs    = 0;
+let resizeTimerId  = null;
+let stagePhase     = -1;
+
+const numberTweens = new WeakMap();
 
 // ─── TOOLTIP ──────────────────────────────────────────────────
 let ttEl;
@@ -52,6 +64,49 @@ function hideTip() {
   ttEl.classList.remove('visible');
 }
 
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+function getActiveBlock(r = lastResult) {
+  if (!r?.blocks?.length) return null;
+  return r.blocks[clamp(viewBlock, 0, r.blocks.length - 1)];
+}
+
+function tweenNumber(el, target, {
+  duration = 450,
+  decimals = 0,
+  prefix = '',
+  suffix = '',
+} = {}) {
+  if (!el) return;
+  const previous = parseFloat(el.dataset.currentValue ?? target) || 0;
+  const next = Number(target);
+  const priorFrame = numberTweens.get(el);
+  if (priorFrame) cancelAnimationFrame(priorFrame);
+
+  const start = performance.now();
+  const tick = now => {
+    const t = clamp((now - start) / duration, 0, 1);
+    const eased = 1 - Math.pow(1 - t, 3);
+    const value = previous + (next - previous) * eased;
+    el.textContent = `${prefix}${value.toFixed(decimals)}${suffix}`;
+    if (t < 1) {
+      numberTweens.set(el, requestAnimationFrame(tick));
+    } else {
+      el.dataset.currentValue = String(next);
+      numberTweens.delete(el);
+    }
+  };
+  numberTweens.set(el, requestAnimationFrame(tick));
+}
+
+function smoothScrollToElement(el, offset = 84) {
+  if (!el) return;
+  const top = window.scrollY + el.getBoundingClientRect().top - offset;
+  window.scrollTo({ top, behavior: 'smooth' });
+}
+
 // ─── BOOT ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   model = new TransformerModel();
@@ -61,7 +116,10 @@ document.addEventListener('DOMContentLoaded', () => {
   buildPresets();
   wireControls();
   wireAnimPanel();
+  wireMatMulButtons();
+  wireStackStageControls();
   wireExplainers();
+  wireResizeHandler();
   loadPreset(PRESETS[0]);
 });
 
@@ -113,12 +171,12 @@ function removeToken(i) {
 
 // ─── CONTROLS ─────────────────────────────────────────────────
 function wireControls() {
-  document.getElementById('btn-clear').addEventListener('click', () => {
+  document.getElementById('btn-clear').onclick = () => {
     sequence = [];
     run();
-  });
+  };
 
-  document.getElementById('btn-random').addEventListener('click', () => {
+  document.getElementById('btn-random').onclick = () => {
     const n = 3 + Math.floor(Math.random() * 3);
     const vocab = [...CONFIG.VOCAB];
     sequence = [];
@@ -127,10 +185,11 @@ function wireControls() {
       sequence.push(vocab.splice(idx, 1)[0]);
     }
     run();
-  });
+  };
 
   document.getElementById('focus-query').addEventListener('change', e => {
     focusQuery = +e.target.value;
+    updateHeroCode();
     if (lastResult) renderAll(lastResult);
   });
 
@@ -154,7 +213,7 @@ function wireControls() {
   document.querySelectorAll('.arch-node').forEach(btn => {
     btn.addEventListener('click', () => {
       const target = document.getElementById(btn.dataset.target);
-      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (target) smoothScrollToElement(target, 96);
     });
   });
 }
@@ -225,7 +284,7 @@ function goToAnimStep(idx) {
   // scroll to card
   const card = document.getElementById(STEP_IDS[animStep]);
   if (card) {
-    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    smoothScrollToElement(card, Math.max(56, window.innerHeight * 0.12));
     // flash glow
     STEP_IDS.forEach(id => document.getElementById(id)?.classList.remove('anim-active', 'flash'));
     card.classList.add('anim-active', 'flash');
@@ -273,10 +332,12 @@ function scheduleNextStep() {
 let mmData = null;   // { X, W, result, tokenLabels, dimLabels }
 
 function buildMatMulDisplay() {
-  if (!lastResult) return;
-  const h = lastResult.heads[activeHead];
-  const X = lastResult.withPE;           // seq × d_model
-  const W = model.WQ[activeHead];        // d_model × d_head
+  const block = getActiveBlock();
+  if (!lastResult || !block) return;
+  const h = block.heads[activeHead];
+  const params = model.blocks[clamp(viewBlock, 0, model.blocks.length - 1)];
+  const X = block.input;                 // seq × d_model
+  const W = params.WQ[activeHead];       // d_model × d_head
   const result = h.Q;                    // seq × d_head
 
   mmData = {
@@ -284,6 +345,7 @@ function buildMatMulDisplay() {
     tokenLabels: lastResult.tokens,
     rowDims:  X[0].map((_, i) => `d${i}`),
     colDims:  result[0].map((_, i) => `h${i}`),
+    blockIndex: viewBlock,
   };
   renderMatMul();
 }
@@ -311,15 +373,15 @@ function renderMatMul() {
   const xDiv = matrixHTML(
     [xVec.map(v => v.toFixed(2))],
     null, rowDims,
-    i => i === curRow ? 'matmul-cell-hi' : '',
-    `x[${curRow}] = "${tokenLabels[curRow]}"`
+    () => 'matmul-cell-hi',
+    `Block ${mmData.blockIndex + 1} input row`
   );
 
   // W matrix — highlight the relevant column
   const wDiv = matrixHTML(
     W.map(row => row.map(v => v.toFixed(2))),
     rowDims, colDims,
-    () => '',
+    (_ri, ci) => ci === 0 ? 'matmul-cell-hi' : '',
     'W_Q'
   );
 
@@ -327,8 +389,8 @@ function renderMatMul() {
   const qDiv = matrixHTML(
     [qVec.map(v => v.toFixed(2))],
     null, colDims,
-    () => 'matmul-cell-dot',
-    `Q[${curRow}] = "${tokenLabels[curRow]}"`
+    (_ri, ci) => ci === 0 ? 'matmul-cell-dot' : '',
+    `Q row for "${tokenLabels[curRow]}"`
   );
 
   const eq1 = document.createElement('span');
@@ -346,14 +408,43 @@ function renderMatMul() {
   wrap.appendChild(qDiv);
   container.appendChild(wrap);
 
-  // Step detail
-  const detail = document.createElement('p');
-  detail.style.cssText = 'margin:10px 0 0;color:#97afbb;font-size:0.85rem;font-family:IBM Plex Mono,monospace';
-
   // Compute dot product for first output dim as example
-  const dotEx = xVec.reduce((s, v, i) => s + v * W[i][0], 0);
-  detail.innerHTML = `Q[${curRow}][0] = Σ x[${curRow}][i] · W_Q[i][0] = <strong style="color:#8ef2ca">${dotEx.toFixed(4)}</strong>`;
+  const contributions = xVec.map((v, i) => ({
+    dim: rowDims[i],
+    x: v,
+    w: W[i][0],
+    out: v * W[i][0],
+  }));
+  const dotEx = contributions.reduce((sum, item) => sum + item.out, 0);
+
+  const detail = document.createElement('div');
+  detail.className = 'matmul-detail';
+  detail.innerHTML =
+    `<p>Q[${curRow}][0] accumulates animated contributions for
+      <span class="token-chip-inline">${tokenLabels[curRow]}</span> inside block ${mmData.blockIndex + 1}.</p>`;
   container.appendChild(detail);
+
+  const trace = document.createElement('div');
+  trace.className = 'matmul-trace';
+  contributions.forEach((item, idx) => {
+    const chip = document.createElement('div');
+    chip.className = 'matmul-trace-chip';
+    chip.style.animationDelay = `${idx * 70}ms`;
+    chip.innerHTML =
+      `<strong>${item.dim}</strong>` +
+      `<span>${item.x.toFixed(2)} × ${item.w.toFixed(2)}</span>` +
+      `<em>= ${item.out.toFixed(3)}</em>`;
+    trace.appendChild(chip);
+  });
+  container.appendChild(trace);
+
+  const sumLine = document.createElement('div');
+  sumLine.className = 'matmul-sum';
+  sumLine.innerHTML =
+    `<span>Animated dot-product total</span>` +
+    `<strong class="matmul-result" id="matmul-dot-result">0.0000</strong>`;
+  container.appendChild(sumLine);
+  tweenNumber(document.getElementById('matmul-dot-result'), dotEx, { decimals: 4, duration: 700 });
 
   // update nav buttons
   const prev = document.getElementById('mm-prev');
@@ -416,15 +507,15 @@ function wireMatMulButtons() {
   const auto = document.getElementById('mm-auto');
   if (!prev) return;
 
-  prev.addEventListener('click', () => {
+  prev.onclick = () => {
     mmRow = Math.max(0, mmRow - 1);
     renderMatMul();
-  });
-  next.addEventListener('click', () => {
+  };
+  next.onclick = () => {
     if (lastResult) mmRow = Math.min(lastResult.tokens.length - 1, mmRow + 1);
     renderMatMul();
-  });
-  auto.addEventListener('click', () => {
+  };
+  auto.onclick = () => {
     if (mmAutoTimer) { clearInterval(mmAutoTimer); mmAutoTimer = null; auto.textContent = '▶ Auto-play'; return; }
     auto.textContent = '⏸ Stop';
     mmAutoTimer = setInterval(() => {
@@ -433,7 +524,7 @@ function wireMatMulButtons() {
       renderMatMul();
       if (mmRow === 0) { clearInterval(mmAutoTimer); mmAutoTimer = null; auto.textContent = '▶ Auto-play'; }
     }, 1200);
-  });
+  };
 }
 
 // ─── FOCUS SELECTS ────────────────────────────────────────────
@@ -466,17 +557,23 @@ function updateFocusSelects() {
 function run() {
   renderSequenceTokens();
   updateStats();
-  updateHeroCode();
 
   const pipeline = document.querySelector('.pipeline');
   pipeline.classList.remove('ready');
 
   if (sequence.length < 2) {
+    lastResult = null;
     pipeline.classList.add('is-empty');
     document.getElementById('live-status').textContent = 'Pick at least 2 tokens';
     document.getElementById('sequence-shape').textContent =
       `${sequence.length} token${sequence.length !== 1 ? 's' : ''}`;
     document.getElementById('anim-panel').style.display = 'none';
+    document.getElementById('stack-stage').innerHTML = '';
+    document.getElementById('stack-active-label').textContent = `Viewing block 1 of ${blockCount}`;
+    document.getElementById('stack-stage-status').textContent = 'Input + PE';
+    document.getElementById('stack-focus-shift').textContent = 'Focus token shift: 0.000';
+    stopStagePlay();
+    updateHeroCode();
     return;
   }
 
@@ -486,16 +583,263 @@ function run() {
     `${sequence.length} × ${CONFIG.D_MODEL}`;
 
   updateFocusSelects();
-  lastResult = model.forward(sequence);
+  lastResult = model.forward(sequence, blockCount);
+  viewBlock = clamp(viewBlock, 0, lastResult.blocks.length - 1);
+  stageProgress = clamp(stageProgress || 0, 0, lastResult.numBlocks + 1);
   mmRow = 0;
+  updateHeroCode();
 
   requestAnimationFrame(() => {
     renderAll(lastResult);
     buildMatMulDisplay();
-    wireMatMulButtons();
     showAnimPanel();
     requestAnimationFrame(() => pipeline.classList.add('ready'));
   });
+}
+
+function redrawCurrentView() {
+  if (!lastResult) {
+    updateHeroCode();
+    return;
+  }
+  updateStats();
+  updateHeroCode();
+  renderAll(lastResult);
+  buildMatMulDisplay();
+}
+
+function wireResizeHandler() {
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimerId);
+    resizeTimerId = setTimeout(() => {
+      redrawCurrentView();
+    }, 120);
+  });
+}
+
+function wireStackStageControls() {
+  const blockSlider = document.getElementById('block-count');
+  const scrub = document.getElementById('stack-scrub');
+
+  blockSlider.addEventListener('input', () => {
+    const nextCount = +blockSlider.value;
+    if (nextCount === blockCount) return;
+    blockCount = nextCount;
+    viewBlock = clamp(viewBlock, 0, blockCount - 1);
+    stageProgress = clamp(stageProgress, 0, blockCount + 1);
+    stopStagePlay();
+    updateStats();
+    syncStageScrubber();
+    run();
+  });
+
+  scrub.addEventListener('input', () => {
+    stageProgress = +scrub.value;
+    stopStagePlay();
+    syncStageState();
+    renderStackStage(lastResult);
+  });
+
+  document.getElementById('stack-play').onclick = () => {
+    stagePlaying ? stopStagePlay() : startStagePlay();
+  };
+  document.getElementById('stack-prev').onclick = () => {
+    stopStagePlay();
+    if (!lastResult) return;
+    setViewBlock(viewBlock - 1, { syncStage: true });
+  };
+  document.getElementById('stack-next').onclick = () => {
+    stopStagePlay();
+    if (!lastResult) return;
+    setViewBlock(viewBlock + 1, { syncStage: true });
+  };
+
+  updateStats();
+  syncStageScrubber();
+}
+
+function syncStageScrubber() {
+  const scrub = document.getElementById('stack-scrub');
+  if (!scrub) return;
+  scrub.max = String(blockCount + 1);
+  scrub.value = String(stageProgress);
+  document.getElementById('block-count').value = String(blockCount);
+  document.getElementById('block-count-label').textContent =
+    `${blockCount} block${blockCount !== 1 ? 's' : ''}`;
+}
+
+function getStageStatusLabel(progress = stageProgress, total = blockCount) {
+  if (!total) return 'Input + PE';
+  if (progress < 0.5) return 'Input + PE';
+  if (progress >= total + 0.5) return 'Final output';
+  const blockIdx = clamp(Math.round(progress) - 1, 0, total - 1);
+  return `Block ${blockIdx + 1} focus`;
+}
+
+function syncStageState() {
+  if (!lastResult) return;
+  const total = lastResult.numBlocks;
+  const nextPhase = stageProgress < 0.5
+    ? -1
+    : stageProgress >= total + 0.5
+      ? total
+      : clamp(Math.round(stageProgress) - 1, 0, total - 1);
+
+  if (nextPhase !== stagePhase && nextPhase >= 0 && nextPhase < total) {
+    stagePhase = nextPhase;
+    setViewBlock(nextPhase, { syncStage: false });
+  } else if (nextPhase !== stagePhase) {
+    stagePhase = nextPhase;
+  }
+
+  document.getElementById('stack-stage-status').textContent = getStageStatusLabel(stageProgress, total);
+  syncStageScrubber();
+}
+
+function startStagePlay() {
+  if (!lastResult) return;
+  stagePlaying = true;
+  stageLastTs = 0;
+  document.getElementById('stack-play').textContent = '⏸ Pause stack';
+  document.getElementById('stack-play').classList.add('playing');
+  const duration = 3600 + lastResult.numBlocks * 700;
+
+  const tick = ts => {
+    if (!stagePlaying) return;
+    if (!stageLastTs) stageLastTs = ts;
+    const delta = ts - stageLastTs;
+    stageLastTs = ts;
+    const advance = (delta / duration) * (lastResult.numBlocks + 1);
+    stageProgress = clamp(stageProgress + advance, 0, lastResult.numBlocks + 1);
+    syncStageState();
+    renderStackStage(lastResult);
+    if (stageProgress >= lastResult.numBlocks + 1) {
+      stopStagePlay();
+      return;
+    }
+    stageRafId = requestAnimationFrame(tick);
+  };
+
+  stageRafId = requestAnimationFrame(tick);
+}
+
+function stopStagePlay() {
+  stagePlaying = false;
+  stageLastTs = 0;
+  if (stageRafId) cancelAnimationFrame(stageRafId);
+  stageRafId = null;
+  const btn = document.getElementById('stack-play');
+  if (btn) {
+    btn.textContent = '▶ Play stack';
+    btn.classList.remove('playing');
+  }
+}
+
+function setViewBlock(idx, { syncStage = false } = {}) {
+  if (!lastResult?.blocks?.length) return;
+  const next = clamp(idx, 0, lastResult.blocks.length - 1);
+  if (viewBlock === next && !syncStage) return;
+  viewBlock = next;
+  if (syncStage) {
+    stageProgress = next + 1;
+    stagePhase = next;
+    syncStageScrubber();
+    document.getElementById('stack-stage-status').textContent = getStageStatusLabel(stageProgress, lastResult.numBlocks);
+  }
+  redrawCurrentView();
+}
+
+function renderStackStage(r) {
+  const container = document.getElementById('stack-stage');
+  if (!container) return;
+  container.innerHTML = '';
+  if (!r?.blocks?.length) return;
+
+  const fq = clamp(focusQuery, 0, r.tokens.length - 1);
+  const finalVec = r.finalOutput[fq];
+  const baseVec = r.withPE[fq];
+  const focusShift = Math.sqrt(finalVec.reduce((sum, value, idx) => sum + (value - baseVec[idx]) ** 2, 0));
+  document.getElementById('stack-active-label').textContent =
+    `Viewing block ${viewBlock + 1} of ${r.numBlocks}`;
+  document.getElementById('stack-focus-shift').textContent =
+    `Focus token shift: ${focusShift.toFixed(3)}`;
+
+  const frame = document.createElement('div');
+  frame.className = 'stack-stage-frame';
+  frame.style.setProperty('--stage-stops', String(r.numBlocks + 2));
+  frame.style.setProperty('--stage-progress', String(stageProgress));
+  container.appendChild(frame);
+
+  const grid = document.createElement('div');
+  grid.className = 'stack-stage-grid';
+  frame.appendChild(grid);
+
+  const inputCard = document.createElement('div');
+  inputCard.className = 'stack-node input';
+  inputCard.innerHTML =
+    `<span class="stack-node-eyebrow">Input</span>` +
+    `<strong>Embedding + position</strong>` +
+    `<small>${r.tokens.length} tokens enter the stack</small>`;
+  grid.appendChild(inputCard);
+
+  r.blocks.forEach((block, idx) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'stack-node stack-block' + (idx === viewBlock ? ' active' : '');
+    const delta = Math.sqrt(block.output[fq].reduce((sum, value, dim) =>
+      sum + (value - block.input[fq][dim]) ** 2, 0
+    ));
+    button.innerHTML =
+      `<span class="stack-node-eyebrow">Block ${idx + 1}</span>` +
+      `<strong>Attention → FFN</strong>` +
+      `<small>focus Δ ${delta.toFixed(3)}</small>` +
+      `<div class="stack-block-bars"><span></span><span></span></div>`;
+    button.onclick = () => {
+      stopStagePlay();
+      setViewBlock(idx, { syncStage: true });
+    };
+    grid.appendChild(button);
+  });
+
+  const outputCard = document.createElement('div');
+  outputCard.className = 'stack-node output';
+  outputCard.innerHTML =
+    `<span class="stack-node-eyebrow">Output</span>` +
+    `<strong>Contextual vectors</strong>` +
+    `<small>${r.numBlocks} stacked block${r.numBlocks !== 1 ? 's' : ''}</small>`;
+  grid.appendChild(outputCard);
+
+  const beam = document.createElement('div');
+  beam.className = 'stack-beam';
+  beam.style.left = `calc(${(stageProgress / (r.numBlocks + 1)) * 100}% - 48px)`;
+  frame.appendChild(beam);
+
+  const packetLayer = document.createElement('div');
+  packetLayer.className = 'stack-packets';
+  frame.appendChild(packetLayer);
+
+  r.tokens.forEach((token, idx) => {
+    const packet = document.createElement('button');
+    packet.type = 'button';
+    packet.className = 'stack-packet' + (idx === fq ? ' focus' : '');
+    const baseHue = 190 + idx * 16;
+    const xPct = (stageProgress / (r.numBlocks + 1)) * 100;
+    const y = 66 + (idx % 3) * 64 + Math.floor(idx / 3) * 8;
+    packet.style.left = `${xPct}%`;
+    packet.style.top = `${y}px`;
+    packet.style.setProperty('--packet-color', `hsl(${baseHue} 78% 64%)`);
+    packet.style.setProperty('--packet-delay', `${idx * 70}ms`);
+    packet.innerHTML = `<span class="stack-packet-word">${token}</span><span class="stack-packet-pos">t${idx}</span>`;
+    packet.onclick = () => {
+      focusQuery = idx;
+      if (focusKey === idx && r.tokens.length > 1) focusKey = (idx + 1) % r.tokens.length;
+      updateFocusSelects();
+      redrawCurrentView();
+    };
+    packetLayer.appendChild(packet);
+  });
+
+  syncStageState();
 }
 
 function renderSequenceTokens() {
@@ -520,16 +864,30 @@ function renderSequenceTokens() {
 }
 
 function updateStats() {
-  document.getElementById('stat-token-count').textContent = sequence.length;
+  tweenNumber(document.getElementById('stat-token-count'), sequence.length, { duration: 400 });
+  tweenNumber(document.getElementById('stat-block-count'), blockCount, { duration: 400 });
   document.getElementById('stat-shape').textContent = `${sequence.length} x ${CONFIG.D_MODEL}`;
+  document.getElementById('hero-stack-badge').textContent =
+    blockCount === 1 ? 'Single Transformer Block' : `${blockCount} Transformer Blocks`;
+  document.getElementById('block-count-label').textContent =
+    `${blockCount} block${blockCount !== 1 ? 's' : ''}`;
 }
 
 function updateHeroCode() {
   document.getElementById('hero-sequence-code').textContent = JSON.stringify(sequence);
+  const out = document.getElementById('hero-output-code');
+  if (!lastResult || sequence.length < 2) {
+    out.textContent = '[]';
+    return;
+  }
+  const fq = clamp(focusQuery, 0, lastResult.tokens.length - 1);
+  const vec = lastResult.finalOutput[fq];
+  out.textContent = `${lastResult.tokens[fq]} → [${vec.slice(0, 4).map(v => v.toFixed(2)).join(', ')}, …]`;
 }
 
 // ─── RENDER ALL ───────────────────────────────────────────────
 function renderAll(r) {
+  renderStackStage(r);
   renderEmbedStep(r);
   renderPEStep(r);
   renderAttnStep(r);
@@ -538,6 +896,7 @@ function renderAll(r) {
   renderOutputStep(r);
   startArchRailObserver();
   updateStepDots(animStep);
+  updateHeroCode();
 }
 
 // ─── COLOR UTILS ──────────────────────────────────────────────
@@ -573,11 +932,14 @@ function drawMatrix(canvasId, matrix, rowLabels, colLabels) {
 
   const rows = matrix.length;
   const cols = matrix[0].length;
-  const avW  = (canvas.parentElement?.clientWidth || 480) - 36;
-  const cellW = Math.max(18, Math.min(52, Math.floor(avW / cols)));
-  const cellH = Math.max(18, Math.min(44, Math.floor(260 / rows)));
-  const padL  = rowLabels ? 54 : 8;
+  const parentWidth = canvas.parentElement?.clientWidth || 480;
+  const avW  = Math.max(180, parentWidth - 20);
+  const maxRowLabel = rowLabels?.reduce((max, lbl) => Math.max(max, String(lbl).length), 0) || 0;
+  const padL  = rowLabels ? clamp(30 + maxRowLabel * 4, 34, 62) : 8;
   const padT  = colLabels ? 26 : 6;
+  const maxCellW = Math.floor((avW - padL - 4) / cols);
+  const cellW = clamp(maxCellW, 12, 52);
+  const cellH = clamp(Math.floor(260 / rows), 16, 44);
   const W = padL + cols * cellW + 4;
   const H = padT + rows * cellH + 4;
   const dpr = window.devicePixelRatio || 1;
@@ -670,64 +1032,49 @@ function drawBarChart(containerId, values, dimLabels) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
-  const isNew = !container.querySelector('svg');
+  container.innerHTML = '';
   const W = Math.max(240, container.clientWidth || 320);
   const barH = 20, gap = 5;
   const padL = 40, padR = 62, padT = 4, padB = 4;
   const H = padT + values.length * (barH + gap) + padB;
   const maxAbs = Math.max(...values.map(Math.abs), 1e-6);
   const xS = d3.scaleLinear().domain([-maxAbs, maxAbs]).range([padL, W - padR]);
+  const svg = d3.select(container).append('svg').attr('width', W).attr('height', H);
 
-  let svg;
-  if (isNew) {
-    container.innerHTML = '';
-    svg = d3.select(container).append('svg').attr('width', W).attr('height', H);
+  svg.append('line')
+    .attr('x1', xS(0)).attr('y1', padT).attr('x2', xS(0)).attr('y2', H - padB)
+    .attr('stroke', 'rgba(255,255,255,0.12)').attr('stroke-width', 1);
 
-    svg.append('line')
-      .attr('x1', xS(0)).attr('y1', padT).attr('x2', xS(0)).attr('y2', H - padB)
-      .attr('stroke', 'rgba(255,255,255,0.12)').attr('stroke-width', 1);
+  values.forEach((v, i) => {
+    const y = padT + i * (barH + gap);
+    const x0 = Math.min(xS(0), xS(v));
+    const width = Math.abs(xS(v) - xS(0));
+    const tx = clamp(xS(v) + (v >= 0 ? 5 : -5), padL + 8, W - 34);
 
-    values.forEach((v, i) => {
-      const y = padT + i * (barH + gap);
-      svg.append('rect').attr('class', `bg-bar-${i}`)
-        .attr('x', padL).attr('y', y).attr('width', W - padL - padR).attr('height', barH)
-        .attr('fill', 'rgba(255,255,255,0.04)').attr('rx', 5);
+    svg.append('rect')
+      .attr('x', padL).attr('y', y).attr('width', W - padL - padR).attr('height', barH)
+      .attr('fill', 'rgba(255,255,255,0.04)').attr('rx', 5);
 
-      svg.append('rect').attr('class', `val-bar-${i}`)
-        .attr('x', Math.min(xS(0), xS(v))).attr('y', y)
-        .attr('width', Math.abs(xS(v) - xS(0))).attr('height', barH)
-        .attr('fill', v >= 0 ? '#60d7ff' : '#ff8f4d').attr('rx', 4).attr('opacity', 0.82);
+    svg.append('rect')
+      .attr('x', x0).attr('y', y)
+      .attr('width', 0).attr('height', barH)
+      .attr('fill', v >= 0 ? '#60d7ff' : '#ff8f4d').attr('rx', 4).attr('opacity', 0.82)
+      .transition().duration(420).delay(i * 30)
+      .attr('width', width);
 
-      svg.append('text').attr('class', `lbl-bar-${i}`)
-        .attr('x', padL - 5).attr('y', y + barH / 2)
-        .attr('text-anchor', 'end').attr('dominant-baseline', 'middle')
-        .attr('fill', '#97afbb').attr('font-size', 10)
-        .attr('font-family', 'IBM Plex Mono, monospace')
-        .text(dimLabels ? dimLabels[i] : `d${i}`);
+    svg.append('text')
+      .attr('x', padL - 5).attr('y', y + barH / 2)
+      .attr('text-anchor', 'end').attr('dominant-baseline', 'middle')
+      .attr('fill', '#97afbb').attr('font-size', 10)
+      .attr('font-family', 'IBM Plex Mono, monospace')
+      .text(dimLabels ? dimLabels[i] : `d${i}`);
 
-      svg.append('text').attr('class', `val-txt-${i}`)
-        .attr('x', xS(v) + (v >= 0 ? 5 : -5)).attr('y', y + barH / 2)
-        .attr('text-anchor', v >= 0 ? 'start' : 'end').attr('dominant-baseline', 'middle')
-        .attr('fill', '#f4d8ab').attr('font-size', 9)
-        .attr('font-family', 'IBM Plex Mono, monospace').text(v.toFixed(3));
-    });
-  } else {
-    // animate update
-    svg = d3.select(container).select('svg');
-    const dur = 450;
-    values.forEach((v, i) => {
-      svg.select(`.val-bar-${i}`)
-        .transition().duration(dur)
-        .attr('x', Math.min(xS(0), xS(v)))
-        .attr('width', Math.abs(xS(v) - xS(0)))
-        .attr('fill', v >= 0 ? '#60d7ff' : '#ff8f4d');
-      svg.select(`.val-txt-${i}`)
-        .transition().duration(dur)
-        .attr('x', xS(v) + (v >= 0 ? 5 : -5))
-        .attr('text-anchor', v >= 0 ? 'start' : 'end')
-        .text(v.toFixed(3));
-    });
-  }
+    svg.append('text')
+      .attr('x', tx).attr('y', y + barH / 2)
+      .attr('text-anchor', v >= 0 ? 'start' : 'end').attr('dominant-baseline', 'middle')
+      .attr('fill', '#f4d8ab').attr('font-size', 9)
+      .attr('font-family', 'IBM Plex Mono, monospace').text(v.toFixed(3));
+  });
 }
 
 // ─── MINI STACKED BAR ─────────────────────────────────────────
@@ -770,7 +1117,7 @@ function appendMiniBar(container, vec, label, color) {
       .attr('fill', '#7a9baa').attr('font-size', 8)
       .attr('font-family', 'IBM Plex Mono, monospace').text(`d${i}`);
     svg.append('text')
-      .attr('x', x1 + (v >= 0 ? 3 : -3)).attr('y', y + barH / 2)
+      .attr('x', clamp(x1 + (v >= 0 ? 3 : -3), padL + 6, W - 26)).attr('y', y + barH / 2)
       .attr('text-anchor', v >= 0 ? 'start' : 'end').attr('dominant-baseline', 'middle')
       .attr('fill', '#f4d8ab').attr('font-size', 8)
       .attr('font-family', 'IBM Plex Mono, monospace').text(v.toFixed(2));
@@ -851,7 +1198,7 @@ function drawAttnFlow(containerId, weights, tokens, queryIdx) {
   container.innerHTML = '';
 
   const n = tokens.length;
-  const W = Math.max(420, container.clientWidth || 600);
+  const W = Math.max(280, container.clientWidth || 600);
   const H = 220;
   const padX = 55;
   const step = n <= 1 ? 0 : (W - 2 * padX) / (n - 1);
@@ -931,7 +1278,7 @@ function drawSimilarity(containerId, matrix, tokens) {
   container.innerHTML = '';
 
   const n = tokens.length;
-  const avail = Math.max(240, container.clientWidth || 500);
+  const avail = Math.max(220, container.clientWidth || 500);
   const cellSize = Math.min(68, Math.floor((avail - 90) / n));
   const padL = 74, padT = 54;
   const W = padL + n * cellSize + 10;

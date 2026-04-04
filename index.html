@@ -42,7 +42,7 @@
 
       <div class="hero-panel">
         <div class="hero-panel-header">
-          <span class="mini-badge">Single Transformer Block</span>
+          <span class="mini-badge" id="hero-stack-badge">Single Transformer Block</span>
           <span class="mini-badge warm">Live Browser Math</span>
         </div>
         <div class="hero-stats">
@@ -54,7 +54,11 @@
             <span class="stat-value" id="stat-head-count">2</span>
             <span class="stat-label">attention heads</span>
           </div>
-          <div class="stat-card span-two">
+          <div class="stat-card">
+            <span class="stat-value" id="stat-block-count">1</span>
+            <span class="stat-label">transformer blocks</span>
+          </div>
+          <div class="stat-card">
             <span class="stat-value compact" id="stat-shape">0 x 8</span>
             <span class="stat-label">sequence shape inside the model</span>
           </div>
@@ -63,6 +67,7 @@
           <span>input</span>
           <code id="hero-sequence-code">[]</code>
           <span>output</span>
+          <code id="hero-output-code">[]</code>
         </div>
       </div>
     </header>
@@ -149,6 +154,46 @@
             Use the architecture rail to jump to any stage. The active card
             follows your scroll position.
           </p>
+        </div>
+
+        <div class="stack-stage-card">
+          <div class="stack-stage-header">
+            <div>
+              <p class="section-kicker">Stacked Encoder View</p>
+              <h3>Editable multi-block animation</h3>
+            </div>
+            <p class="section-note">
+              Scrub through the stack, click any block to inspect it, or autoplay
+              the whole pass like a short motion sequence.
+            </p>
+          </div>
+
+          <div class="stack-stage-toolbar">
+            <label class="stack-field">
+              <span>Blocks</span>
+              <input type="range" id="block-count" min="1" max="4" step="1" value="1">
+              <span class="mini-badge" id="block-count-label">1 block</span>
+            </label>
+
+            <div class="stack-actions">
+              <button class="anim-btn" id="stack-play" type="button">▶ Play stack</button>
+              <button class="anim-step-btn anim-btn" id="stack-prev" type="button">← Prev block</button>
+              <button class="anim-step-btn anim-btn" id="stack-next" type="button">Next block →</button>
+            </div>
+
+            <label class="stack-field scrubber">
+              <span>Timeline</span>
+              <input type="range" id="stack-scrub" min="0" max="2" step="0.01" value="0">
+              <span class="mini-badge" id="stack-stage-status">Input + PE</span>
+            </label>
+          </div>
+
+          <div class="stack-stage-meta">
+            <span class="mini-badge warm" id="stack-active-label">Viewing block 1 of 1</span>
+            <span class="mini-badge" id="stack-focus-shift">Focus token shift: 0.000</span>
+          </div>
+
+          <div id="stack-stage" class="stack-stage"></div>
         </div>
 
         <div class="architecture-rail">

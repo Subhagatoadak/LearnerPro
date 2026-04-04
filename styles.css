@@ -579,7 +579,7 @@ code,
   margin-bottom: 20px;
   opacity: 0;
   transform: translateY(22px);
-  transition: opacity 420ms ease, transform 420ms ease;
+  transition: opacity 420ms cubic-bezier(0.34, 1.56, 0.64, 1), transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1), border-color 280ms ease, box-shadow 280ms ease;
 }
 
 .pipeline.ready .step-card {
@@ -625,6 +625,7 @@ code,
   padding: 18px;
   border: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015));
+  transition: opacity 280ms ease, transform 280ms cubic-bezier(0.34, 1.56, 0.64, 1), border-color 200ms ease, background 200ms ease;
 }
 
 .two-wide .viz-card,
@@ -827,6 +828,19 @@ canvas {
 #residual-focus-bars svg,
 #output-focus-bars svg {
   max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.matrix-viewport {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 18px;
+}
+
+.matrix-viewport canvas {
+  min-width: 100%;
 }
 
 .attention-svg-label {
@@ -1541,5 +1555,26 @@ canvas {
   .sequence-tokens {
     min-height: 100px;
     padding: 14px;
+  }
+
+  /* Ensure matrices don't overflow on mobile */
+  .matrix-viewport,
+  #canvas-embed,
+  #canvas-pe,
+  #canvas-withpe,
+  #canvas-Q,
+  #canvas-K,
+  #canvas-scores,
+  #canvas-V,
+  #canvas-head-out,
+  #canvas-orig,
+  #canvas-final {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .step-grid canvas {
+    max-width: 100% !important;
+    height: auto !important;
   }
 }
