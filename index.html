@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Transformer Atlas</title>
+  <meta
+    name="description"
+    content="An interactive GitHub Pages website that explains transformer calculations step by step."
+  >
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap"
+    rel="stylesheet"
+  >
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script src="transformer.js" defer></script>
+  <script src="main.js" defer></script>
+</head>
+<body>
+  <div class="page-shell">
+    <div class="bg-orb orb-a"></div>
+    <div class="bg-orb orb-b"></div>
+    <div class="bg-grid"></div>
+
+    <header class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">GitHub Pages Transformer Explainer</p>
+        <h1>See how a transformer turns a word list into contextual meaning.</h1>
+        <p class="hero-text">
+          Pick tokens, watch every matrix update live, and inspect the exact
+          calculations behind embeddings, positional encoding, self-attention,
+          residual connections, layer normalization, and the feed-forward block.
+        </p>
+        <div class="hero-actions">
+          <a class="primary-link" href="#lab">Build A Sequence</a>
+          <a class="secondary-link" href="#pipeline">Inspect The Layer</a>
+        </div>
+      </div>
+
+      <div class="hero-panel">
+        <div class="hero-panel-header">
+          <span class="mini-badge">Single Transformer Block</span>
+          <span class="mini-badge warm">Live Browser Math</span>
+        </div>
+        <div class="hero-stats">
+          <div class="stat-card">
+            <span class="stat-value" id="stat-token-count">0</span>
+            <span class="stat-label">tokens selected</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="stat-head-count">2</span>
+            <span class="stat-label">attention heads</span>
+          </div>
+          <div class="stat-card span-two">
+            <span class="stat-value compact" id="stat-shape">0 x 8</span>
+            <span class="stat-label">sequence shape inside the model</span>
+          </div>
+        </div>
+        <div class="hero-code">
+          <span>input</span>
+          <code id="hero-sequence-code">[]</code>
+          <span>output</span>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section id="lab" class="section-block">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Sequence Lab</p>
+            <h2>Compose a short token sequence</h2>
+          </div>
+          <p class="section-note">
+            This demo stays fully static so it can run directly on GitHub Pages.
+            All calculations happen in the browser.
+          </p>
+        </div>
+
+        <div class="builder-layout">
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <h3>Preset Sequences</h3>
+                <p>Start from a known pattern, then edit it.</p>
+              </div>
+            </div>
+            <div class="preset-list" id="preset-list"></div>
+            <div class="panel-header spaced">
+              <div>
+                <h3>Token Palette</h3>
+                <p>Click words to append them to the current sequence.</p>
+              </div>
+              <div class="tiny-note">max 6 tokens</div>
+            </div>
+            <div class="word-palette" id="word-palette"></div>
+          </div>
+
+          <div class="panel-card emphasis-card">
+            <div class="panel-header">
+              <div>
+                <h3>Current Sequence</h3>
+                <p>Every change updates the full transformer pipeline.</p>
+              </div>
+              <div class="sequence-actions">
+                <button id="btn-random" class="ghost-btn" type="button">Random</button>
+                <button id="btn-clear" class="ghost-btn" type="button">Clear</button>
+              </div>
+            </div>
+
+            <div class="sequence-tokens" id="sequence-tokens"></div>
+
+            <div class="focus-grid">
+              <label class="field">
+                <span>Focus Query Token</span>
+                <select id="focus-query"></select>
+              </label>
+              <label class="field">
+                <span>Compare Against Key</span>
+                <select id="focus-key"></select>
+              </label>
+              <div class="field">
+                <span>Attention Head</span>
+                <div class="segmented-control">
+                  <button class="head-btn active" data-head="0" type="button">Head 1</button>
+                  <button class="head-btn" data-head="1" type="button">Head 2</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="sequence-meta">
+              <span class="live-pill" id="live-status">Pick at least 2 tokens</span>
+              <span class="shape-pill" id="sequence-shape">0 tokens</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-block architecture-block">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Transformer Flow</p>
+            <h2>One pass through the block</h2>
+          </div>
+          <p class="section-note">
+            Use the architecture rail to jump to any stage. The active card
+            follows your scroll position.
+          </p>
+        </div>
+
+        <div class="architecture-rail">
+          <button class="arch-node active" data-target="step-embed" type="button">1. Embeddings</button>
+          <button class="arch-node" data-target="step-pe" type="button">2. Position</button>
+          <button class="arch-node" data-target="step-attn" type="button">3. Attention</button>
+          <button class="arch-node" data-target="step-addnorm1" type="button">4. Add + Norm</button>
+          <button class="arch-node" data-target="step-ffn" type="button">5. Feed Forward</button>
+          <button class="arch-node" data-target="step-output" type="button">6. Final Context</button>
+        </div>
+      </section>
+
+      <!-- Animation control bar -->
+      <div class="anim-panel" id="anim-panel" style="display:none">
+        <button class="anim-btn" id="anim-play" type="button">▶ Play tour</button>
+        <button class="anim-step-btn anim-btn" id="anim-prev" type="button">← Prev</button>
+        <button class="anim-step-btn anim-btn" id="anim-next" type="button">Next →</button>
+        <button class="anim-btn danger" id="anim-reset" type="button">↺ Reset</button>
+        <div class="anim-speed">
+          <span>Speed</span>
+          <input type="range" id="anim-speed-slider" min="0.5" max="3" step="0.5" value="1">
+          <span id="anim-speed-val">1×</span>
+        </div>
+        <div class="step-progress" id="step-progress"></div>
+      </div>
+
+      <section id="pipeline" class="pipeline">
+        <div class="pipeline-empty" id="pipeline-empty">
+          Add at least two tokens to activate the transformer walkthrough.
+        </div>
+
+        <article id="step-embed" class="step-card">
+          <div class="step-heading">
+            <div>
+              <p class="step-index">Step 01</p>
+              <h2>Token Embeddings</h2>
+            </div>
+            <p class="step-copy">
+              Every token starts as a learned vector of 8 values. Similar words
+              begin with similar directions before context changes them.
+            </p>
+          </div>
+          <div class="formula-strip">embedding(token_i) = E[token_i] &nbsp;∈ ℝ<sup>d_model</sup></div>
+          <div class="explainer">
+            <div class="explainer-header" tabindex="0">
+              <h4>📖 How token embeddings work</h4>
+              <span class="explainer-arrow">▾</span>
+            </div>
+            <div class="explainer-body">
+              <p>Every word in the vocabulary maps to a fixed-length vector of real numbers.
+                 Think of it as a huge look-up table: the model assigns each word a unique address
+                 in a high-dimensional space.</p>
+              <ol>
+                <li>A <strong>vocabulary</strong> list maps word strings → integer IDs.</li>
+                <li>An <strong>embedding matrix E</strong> of shape <code>[vocab_size × d_model]</code>
+                    stores one row per word.</li>
+                <li><code>embedding(word) = E[word_id]</code> — just a row lookup.</li>
+                <li>During training these rows are learned via back-propagation so semantically
+                    similar words end up near each other.</li>
+              </ol>
+              <p>In this demo: <code>d_model = 8</code>, so each word is an 8-number vector.</p>
+            </div>
+          </div>
+          <div class="step-grid two-wide">
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>Embedding Matrix</h3>
+                <span class="mat-dim"></span>
+              </div>
+              <canvas id="canvas-embed"></canvas>
+            </div>
+            <div class="insight-card" id="calc-embed"></div>
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>Focus Token Vector</h3>
+                <span id="embed-focus-label"></span>
+              </div>
+              <div id="embed-focus-bars"></div>
+            </div>
+          </div>
+        </article>
+
+        <article id="step-pe" class="step-card">
+          <div class="step-heading">
+            <div>
+              <p class="step-index">Step 02</p>
+              <h2>Positional Encoding</h2>
+            </div>
+            <p class="step-copy">
+              The same word in a different position should mean something
+              different. Sinusoids inject order into the sequence.
+            </p>
+          </div>
+          <div class="formula-strip">
+            x_i = embedding_i + position_i &nbsp;|&nbsp; PE(pos,2k) = sin(pos/10000<sup>2k/d</sup>) &nbsp;|&nbsp; PE(pos,2k+1) = cos(pos/10000<sup>2k/d</sup>)
+          </div>
+          <div class="explainer">
+            <div class="explainer-header" tabindex="0">
+              <h4>📖 Why sinusoidal positional encodings?</h4>
+              <span class="explainer-arrow">▾</span>
+            </div>
+            <div class="explainer-body">
+              <p>Self-attention has no built-in notion of order — "cat sat" and "sat cat"
+                 would look identical to it. Positional encodings inject position information
+                 into each token's vector.</p>
+              <ul>
+                <li><strong>Sinusoids</strong> of different frequencies let the model represent
+                    any absolute position, and differences between positions generalise to
+                    sequence lengths longer than seen during training.</li>
+                <li>Even dimensions get <code>sin</code>, odd dimensions get <code>cos</code>.</li>
+                <li>Higher dimensions oscillate more slowly, encoding coarser position information.</li>
+                <li>The model can attend to relative positions via linear combinations of these encodings.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="step-grid two-wide">
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>Positional Encoding</h3>
+                <span class="mat-dim"></span>
+              </div>
+              <canvas id="canvas-pe"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>Embedding + Position</h3>
+                <span class="mat-dim"></span>
+              </div>
+              <canvas id="canvas-withpe"></canvas>
+            </div>
+            <div class="insight-card" id="calc-pe"></div>
+          </div>
+        </article>
+
+        <article id="step-attn" class="step-card">
+          <div class="step-heading">
+            <div>
+              <p class="step-index">Step 03</p>
+              <h2>Multi-Head Self-Attention</h2>
+            </div>
+            <p class="step-copy">
+              Each head projects tokens into query, key, and value spaces, then
+              decides which words matter for each token.
+            </p>
+          </div>
+          <div class="formula-strip">
+            Attention(Q,K,V) = softmax( QKᵀ / √d_k ) · V &nbsp;|&nbsp; Q=XW_Q &nbsp; K=XW_K &nbsp; V=XW_V
+          </div>
+          <div class="explainer">
+            <div class="explainer-header" tabindex="0">
+              <h4>📖 Scaled dot-product attention — step by step</h4>
+              <span class="explainer-arrow">▾</span>
+            </div>
+            <div class="explainer-body">
+              <ol>
+                <li><strong>Project</strong>: multiply the input X (seq×d_model) by three weight matrices
+                    W_Q, W_K, W_V (each d_model×d_head) to get Q, K, V matrices.</li>
+                <li><strong>Dot products</strong>: compute Q·Kᵀ giving a (seq×seq) score matrix —
+                    entry [i,j] is how much token i should attend to token j.</li>
+                <li><strong>Scale</strong>: divide by √d_k to prevent vanishing gradients from
+                    large dot-products pushing softmax into saturation.</li>
+                <li><strong>Softmax</strong>: each row becomes a probability distribution over keys.</li>
+                <li><strong>Aggregate</strong>: multiply weights by V to get a weighted average of value vectors.</li>
+              </ol>
+              <p>Multiple heads allow attending to different aspects simultaneously. Their outputs
+                 are concatenated and projected back: <code>concat(head₁…headₙ) · W_O</code>.</p>
+            </div>
+          </div>
+          <div class="matmul-panel" id="matmul-panel">
+            <p class="matmul-title">🔬 Interactive matrix multiply: X × W_Q</p>
+            <div id="matmul-display"></div>
+            <div class="matmul-controls">
+              <button class="matmul-step-btn" id="mm-prev" type="button">← Prev row</button>
+              <button class="matmul-step-btn" id="mm-next" type="button">Next row →</button>
+              <button class="matmul-step-btn" id="mm-auto" type="button">▶ Auto-play</button>
+            </div>
+          </div>
+
+          <div class="step-grid attention-matrices">
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>Q Matrix</h3>
+                <span class="mat-dim"></span>
+              </div>
+              <canvas id="canvas-Q"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>K Transposed</h3>
+                <span class="mat-dim"></span>
+              </div>
+              <canvas id="canvas-K"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>Scaled Scores</h3>
+                <span class="mat-dim"></span>
+              </div>
+              <canvas id="canvas-scores"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>V Matrix</h3>
+                <span class="mat-dim"></span>
+              </div>
+              <canvas id="canvas-V"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>Head Output</h3>
+                <span class="mat-dim"></span>
+              </div>
+              <canvas id="canvas-head-out"></canvas>
+            </div>
+          </div>
+
+          <div class="step-grid">
+            <div class="viz-card head-card active" id="head-card-0">
+              <div class="card-heading">
+                <h3>Head 1 Heatmap</h3>
+                <span>softmax weights</span>
+              </div>
+              <div id="attn-heatmap-h0"></div>
+            </div>
+            <div class="viz-card head-card" id="head-card-1">
+              <div class="card-heading">
+                <h3>Head 2 Heatmap</h3>
+                <span>softmax weights</span>
+              </div>
+              <div id="attn-heatmap-h1"></div>
+            </div>
+            <div class="viz-card wide-card">
+              <div class="card-heading">
+                <h3>Focus Attention Flow</h3>
+                <span id="attn-flow-label"></span>
+              </div>
+              <div id="attention-flow"></div>
+            </div>
+            <div class="insight-card wide-card" id="calc-attn"></div>
+          </div>
+        </article>
+
+        <article id="step-addnorm1" class="step-card">
+          <div class="step-heading">
+            <div>
+              <p class="step-index">Step 04</p>
+              <h2>Residual Add + LayerNorm</h2>
+            </div>
+            <p class="step-copy">
+              The model keeps the original signal, adds the attention output,
+              then normalizes each token vector so values stay well-scaled.
+            </p>
+          </div>
+          <div class="formula-strip">
+            y = LayerNorm(x + Attention(x)) &nbsp;|&nbsp; LayerNorm(v) = (v − μ) / √(σ²+ε)
+          </div>
+          <div class="explainer">
+            <div class="explainer-header" tabindex="0">
+              <h4>📖 Residual connections &amp; Layer Normalization</h4>
+              <span class="explainer-arrow">▾</span>
+            </div>
+            <div class="explainer-body">
+              <p><strong>Residual (skip) connection:</strong> adds the original input back to the
+                 attention output: <code>out = x + Attention(x)</code>. This means the attention
+                 only has to learn <em>corrections</em>, not full representations, which makes training
+                 vastly more stable for deep networks.</p>
+              <p><strong>Layer Normalization:</strong> re-scales each token vector independently
+                 so its mean is 0 and standard deviation is 1. Unlike Batch Norm, it operates
+                 per-token (not per-feature), making it independent of batch size.</p>
+              <ul>
+                <li>Compute mean μ and variance σ² over the d_model dimensions.</li>
+                <li>Normalize: <code>(v[i] − μ) / √(σ²+ε)</code></li>
+                <li>ε (epsilon) ≈ 1e-5 prevents division by zero.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="step-grid two-wide">
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>Residual Source</h3>
+                <span class="mat-dim"></span>
+              </div>
+              <canvas id="canvas-residual-base"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>Attention Output</h3>
+                <span class="mat-dim"></span>
+              </div>
+              <canvas id="canvas-residual-attn"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>After Add + Norm</h3>
+                <span class="mat-dim"></span>
+              </div>
+              <canvas id="canvas-addnorm1"></canvas>
+            </div>
+            <div class="insight-card">
+              <div id="calc-residual"></div>
+            </div>
+            <div class="viz-card wide-card">
+              <div class="card-heading">
+                <h3>Focus Token Transformation</h3>
+                <span id="residual-focus-label"></span>
+              </div>
+              <div id="residual-focus-bars"></div>
+            </div>
+          </div>
+        </article>
+
+        <article id="step-ffn" class="step-card">
+          <div class="step-heading">
+            <div>
+              <p class="step-index">Step 05</p>
+              <h2>Feed-Forward Network</h2>
+            </div>
+            <p class="step-copy">
+              Each token now passes through the same small MLP independently:
+              expand, apply ReLU, then project back to the model width.
+            </p>
+          </div>
+          <div class="formula-strip">
+            FFN(x) = W₂ · ReLU(W₁x + b₁) + b₂ &nbsp;|&nbsp; 8 → 16 → ReLU → 8
+          </div>
+          <div class="explainer">
+            <div class="explainer-header" tabindex="0">
+              <h4>📖 Feed-Forward Network — the per-token MLP</h4>
+              <span class="explainer-arrow">▾</span>
+            </div>
+            <div class="explainer-body">
+              <p>After attention has mixed token representations across the sequence,
+                 each token independently passes through a small two-layer MLP.</p>
+              <ol>
+                <li><strong>Expand</strong>: W₁ (8×16) projects from d_model=8 to d_ff=16.</li>
+                <li><strong>Activate</strong>: ReLU(x) = max(0, x) zeroes out negative activations,
+                    creating sparse feature maps.</li>
+                <li><strong>Project back</strong>: W₂ (16×8) compresses back to d_model=8.</li>
+                <li>Add biases b₁, b₂ at each layer.</li>
+              </ol>
+              <p>Research suggests FFN layers act as <em>key-value memories</em> — keys
+                 activate certain neurons, values store factual associations retrieved at inference.</p>
+              <p>In production models d_ff is typically 4× larger than d_model (e.g. GPT-3 uses
+                 d_model=12288, d_ff=49152).</p>
+            </div>
+          </div>
+          <div class="step-grid">
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>FFN Input</h3>
+                <span class="mat-dim"></span>
+              </div>
+              <canvas id="canvas-ffn-in"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>Hidden Pre-Activation</h3>
+                <span class="mat-dim"></span>
+              </div>
+              <canvas id="canvas-ffn-h1"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>After ReLU</h3>
+                <span class="mat-dim"></span>
+              </div>
+              <canvas id="canvas-ffn-h2"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>FFN Output</h3>
+                <span class="mat-dim"></span>
+              </div>
+              <canvas id="canvas-ffn-out"></canvas>
+            </div>
+            <div class="insight-card" id="calc-ffn"></div>
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>Strongest Hidden Neurons</h3>
+                <span id="ffn-focus-label"></span>
+              </div>
+              <div id="ffn-neurons"></div>
+            </div>
+          </div>
+        </article>
+
+        <article id="step-output" class="step-card">
+          <div class="step-heading">
+            <div>
+              <p class="step-index">Step 06</p>
+              <h2>Final Contextual Output</h2>
+            </div>
+            <p class="step-copy">
+              After the second residual and normalization, each token has a
+              context-aware representation that depends on the whole sequence.
+            </p>
+          </div>
+          <div class="formula-strip">
+            output_i = LayerNorm(z_i + FFN(z_i)) &nbsp;|&nbsp; z = AddNorm₁ output
+          </div>
+          <div class="explainer">
+            <div class="explainer-header" tabindex="0">
+              <h4>📖 The full transformer encoder block</h4>
+              <span class="explainer-arrow">▾</span>
+            </div>
+            <div class="explainer-body">
+              <p>One complete transformer encoder block applies two sub-layers, each with
+                 a residual connection and layer normalization:</p>
+              <ol>
+                <li><code>z = LayerNorm(x + MultiHeadAttn(x))</code></li>
+                <li><code>output = LayerNorm(z + FFN(z))</code></li>
+              </ol>
+              <p>The output is a new sequence of the same shape (seq_len × d_model). It
+                 encodes each token's <strong>contextual meaning</strong> — the same word
+                 in different sentences will now have different vectors.</p>
+              <p>Real models (e.g. BERT, GPT) stack 12–96 of these blocks. Each layer
+                 captures increasingly abstract relationships.</p>
+            </div>
+          </div>
+          <div class="step-grid two-wide">
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>Original Embeddings</h3>
+                <span class="mat-dim"></span>
+              </div>
+              <canvas id="canvas-orig"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>Final Contextual Vectors</h3>
+                <span class="mat-dim"></span>
+              </div>
+              <canvas id="canvas-final"></canvas>
+            </div>
+            <div class="viz-card wide-card">
+              <div class="card-heading">
+                <h3>Contextual Similarity</h3>
+                <span>cosine between final token vectors</span>
+              </div>
+              <div id="similarity-section"></div>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>Original vs Final</h3>
+                <span id="output-focus-label"></span>
+              </div>
+              <div id="output-focus-bars"></div>
+            </div>
+            <div class="insight-card" id="calc-output"></div>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
