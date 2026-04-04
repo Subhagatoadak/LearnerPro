@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e ':*)",
+      "Bash(ls -lh /Users/subhagatoadak/Documents/github/LearnerPro/*.js /Users/subhagatoadak/Documents/github/LearnerPro/*.html /Users/subhagatoadak/Documents/github/LearnerPro/*.css)"
+    ]
+  }
+}

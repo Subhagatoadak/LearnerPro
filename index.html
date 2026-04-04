@@ -601,7 +601,263 @@
           </div>
         </article>
       </section>
+
+      <!-- ═══════════════════════════════════════════════════════
+           TECHNIQUES EXPLORER
+      ════════════════════════════════════════════════════════ -->
+      <section id="techniques" class="section-block techniques-section">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Efficiency &amp; Adaptation</p>
+            <h2>Advanced transformer techniques</h2>
+          </div>
+          <p class="section-note">
+            Pick a technique to see an interactive simulation with live calculations.
+          </p>
+        </div>
+
+        <!-- Dropdown / tab selector -->
+        <div class="tech-selector">
+          <div class="tech-dropdown-wrap">
+            <select id="tech-select" class="tech-select">
+              <option value="kvcache">🗂 KV Cache — faster inference</option>
+              <option value="distillation">🎓 Knowledge Distillation — smaller models</option>
+              <option value="quantization">🔢 Quantization — compress weights</option>
+              <option value="lora">🔬 LoRA — efficient fine-tuning</option>
+            </select>
+          </div>
+          <div class="tech-tab-pills" id="tech-tabs">
+            <button class="tech-tab active" data-tech="kvcache" type="button">KV Cache</button>
+            <button class="tech-tab" data-tech="distillation" type="button">Distillation</button>
+            <button class="tech-tab" data-tech="quantization" type="button">Quantization</button>
+            <button class="tech-tab" data-tech="lora" type="button">LoRA</button>
+          </div>
+        </div>
+
+        <!-- ── KV CACHE ─────────────────────────────────────────── -->
+        <div id="tech-kvcache" class="tech-panel active">
+          <div class="tech-hero">
+            <div class="tech-intro">
+              <h3>Key-Value Caching</h3>
+              <p>During autoregressive generation each new token only needs its own Q, but must
+                 attend to <em>all</em> past tokens' K and V. Without caching, those would be
+                 recomputed every step — wasting O(N²) work. The cache stores them once.</p>
+              <div class="formula-strip">
+                New token cost: compute Q<sub>new</sub>, K<sub>new</sub>, V<sub>new</sub>  → cache K<sub>new</sub>, V<sub>new</sub> → attend over cached [K₁…K<sub>N</sub>]
+              </div>
+            </div>
+            <div class="tech-controls">
+              <div class="ctrl-row">
+                <label class="ctrl-label">Max sequence length</label>
+                <input type="range" id="kv-maxlen" min="3" max="8" value="6" class="ctrl-slider">
+                <span id="kv-maxlen-val" class="ctrl-val">6</span>
+              </div>
+              <div class="ctrl-row">
+                <label class="ctrl-label">Animation speed</label>
+                <input type="range" id="kv-speed" min="400" max="2000" step="200" value="900" class="ctrl-slider">
+                <span id="kv-speed-val" class="ctrl-val">normal</span>
+              </div>
+              <div class="ctrl-btns">
+                <button class="anim-btn" id="kv-play" type="button">▶ Generate tokens</button>
+                <button class="anim-btn danger" id="kv-reset" type="button">↺ Reset</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="tech-grid">
+            <div class="viz-card wide-card">
+              <div class="card-heading">
+                <h3>Token generation &amp; cache state</h3>
+                <span id="kv-step-label" class="mini-badge">Step 0 / 0</span>
+              </div>
+              <div id="kv-cache-vis"></div>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading"><h3>FLOPs: no cache vs cached</h3></div>
+              <div id="kv-flops-chart"></div>
+            </div>
+            <div class="insight-card">
+              <div id="kv-insight"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── KNOWLEDGE DISTILLATION ──────────────────────────── -->
+        <div id="tech-distillation" class="tech-panel">
+          <div class="tech-hero">
+            <div class="tech-intro">
+              <h3>Knowledge Distillation</h3>
+              <p>A large <em>teacher</em> model trains a smaller <em>student</em> by sharing its
+                 <strong>soft probability distributions</strong> over the vocabulary — not just the
+                 single correct label. The soft targets encode relationships between classes that
+                 a one-hot label throws away.</p>
+              <div class="formula-strip">
+                L = α · CE(y, σ(z<sub>s</sub>/T)) + (1−α) · KL(σ(z<sub>t</sub>/T) ‖ σ(z<sub>s</sub>/T))
+              </div>
+            </div>
+            <div class="tech-controls">
+              <div class="ctrl-row">
+                <label class="ctrl-label">Temperature T</label>
+                <input type="range" id="dist-temp" min="0.5" max="10" step="0.5" value="1" class="ctrl-slider">
+                <span id="dist-temp-val" class="ctrl-val">1.0</span>
+              </div>
+              <div class="ctrl-row">
+                <label class="ctrl-label">α (hard/soft mix)</label>
+                <input type="range" id="dist-alpha" min="0" max="1" step="0.1" value="0.5" class="ctrl-slider">
+                <span id="dist-alpha-val" class="ctrl-val">0.5</span>
+              </div>
+              <div class="ctrl-row">
+                <label class="ctrl-label">Student capacity</label>
+                <div class="segmented-control" id="dist-capacity">
+                  <button class="head-btn" data-cap="0.25" type="button">Tiny</button>
+                  <button class="head-btn active" data-cap="0.5" type="button">Small</button>
+                  <button class="head-btn" data-cap="0.75" type="button">Medium</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tech-grid">
+            <div class="viz-card">
+              <div class="card-heading"><h3>Teacher soft labels (T)</h3></div>
+              <div id="dist-teacher-chart"></div>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading"><h3>Student predictions</h3></div>
+              <div id="dist-student-chart"></div>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading"><h3>KL divergence per token</h3></div>
+              <div id="dist-kl-chart"></div>
+            </div>
+            <div class="insight-card wide-card" id="dist-insight"></div>
+          </div>
+        </div>
+
+        <!-- ── QUANTIZATION ────────────────────────────────────── -->
+        <div id="tech-quantization" class="tech-panel">
+          <div class="tech-hero">
+            <div class="tech-intro">
+              <h3>Post-Training Quantization</h3>
+              <p>Replace 32-bit floats with low-bit integers to shrink model size and speed up
+                 inference. INT8 halves memory vs FP16; INT4 halves again.  The key trade-off
+                 is reconstruction error: fewer bits = more rounding noise.</p>
+              <div class="formula-strip">
+                q = round( w / scale ) + zero_point &nbsp;|&nbsp; w̃ = (q − zero_point) × scale &nbsp;|&nbsp; scale = (max−min) / (2<sup>bits</sup>−1)
+              </div>
+            </div>
+            <div class="tech-controls">
+              <div class="ctrl-row">
+                <label class="ctrl-label">Bit-width</label>
+                <div class="segmented-control" id="quant-bits-ctrl">
+                  <button class="head-btn" data-bits="2" type="button">INT2</button>
+                  <button class="head-btn" data-bits="4" type="button">INT4</button>
+                  <button class="head-btn active" data-bits="8" type="button">INT8</button>
+                </div>
+              </div>
+              <div class="ctrl-row">
+                <label class="ctrl-label">Target matrix</label>
+                <div class="segmented-control" id="quant-target">
+                  <button class="head-btn active" data-mat="WQ" type="button">W_Q</button>
+                  <button class="head-btn" data-mat="WO" type="button">W_O</button>
+                  <button class="head-btn" data-mat="W1" type="button">W₁</button>
+                </div>
+              </div>
+              <div class="ctrl-row">
+                <label class="ctrl-label">Scheme</label>
+                <div class="segmented-control" id="quant-scheme">
+                  <button class="head-btn active" data-scheme="absmax" type="button">AbsMax</button>
+                  <button class="head-btn" data-scheme="zeropoint" type="button">Zero-point</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tech-grid">
+            <div class="viz-card">
+              <div class="card-heading"><h3>Original weights (FP32)</h3><span class="mat-dim" id="quant-orig-dim"></span></div>
+              <canvas id="canvas-quant-orig"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading"><h3>Quantized (INT<span id="quant-bits-lbl">8</span>)</h3></div>
+              <canvas id="canvas-quant-q"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading"><h3>Reconstruction error</h3></div>
+              <canvas id="canvas-quant-err"></canvas>
+            </div>
+            <div class="insight-card wide-card" id="quant-insight"></div>
+          </div>
+        </div>
+
+        <!-- ── LORA ───────────────────────────────────────────── -->
+        <div id="tech-lora" class="tech-panel">
+          <div class="tech-hero">
+            <div class="tech-intro">
+              <h3>LoRA — Low-Rank Adaptation</h3>
+              <p>Instead of updating the full weight matrix W (d×d) during fine-tuning,
+                 LoRA injects two small matrices: A (d×r) and B (r×d) with rank r ≪ d.
+                 Only A and B are trained; W is frozen. The effective update is <strong>ΔW = B·A</strong>.
+                 Parameters drop from d² to 2·d·r.</p>
+              <div class="formula-strip">
+                W' = W<sub>0</sub> + (α/r) · B·A &nbsp;|&nbsp; params: d² → 2·d·r &nbsp;|&nbsp; savings: (1 − 2r/d) × 100%
+              </div>
+            </div>
+            <div class="tech-controls">
+              <div class="ctrl-row">
+                <label class="ctrl-label">Rank r</label>
+                <div class="segmented-control" id="lora-rank-ctrl">
+                  <button class="head-btn" data-rank="1" type="button">r=1</button>
+                  <button class="head-btn active" data-rank="2" type="button">r=2</button>
+                  <button class="head-btn" data-rank="4" type="button">r=4</button>
+                </div>
+              </div>
+              <div class="ctrl-row">
+                <label class="ctrl-label">α (scaling)</label>
+                <input type="range" id="lora-alpha" min="0.1" max="4" step="0.1" value="1" class="ctrl-slider">
+                <span id="lora-alpha-val" class="ctrl-val">1.0</span>
+              </div>
+              <div class="ctrl-row">
+                <label class="ctrl-label">Target matrix</label>
+                <div class="segmented-control" id="lora-target">
+                  <button class="head-btn active" data-mat="WQ" type="button">W_Q</button>
+                  <button class="head-btn" data-mat="WK" type="button">W_K</button>
+                  <button class="head-btn" data-mat="WV" type="button">W_V</button>
+                </div>
+              </div>
+              <div class="ctrl-btns">
+                <button class="anim-btn" id="lora-randomize" type="button">🎲 New A,B</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="tech-grid">
+            <div class="viz-card">
+              <div class="card-heading"><h3>W₀ (frozen)</h3><span class="mat-dim" id="lora-w0-dim"></span></div>
+              <canvas id="canvas-lora-w0"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading"><h3>A matrix (d × r)</h3><span class="mat-dim" id="lora-a-dim"></span></div>
+              <canvas id="canvas-lora-A"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading"><h3>B matrix (r × d)</h3><span class="mat-dim" id="lora-b-dim"></span></div>
+              <canvas id="canvas-lora-B"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading"><h3>ΔW = B·A (update)</h3></div>
+              <canvas id="canvas-lora-delta"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading"><h3>W' = W₀ + (α/r)·ΔW</h3></div>
+              <canvas id="canvas-lora-result"></canvas>
+            </div>
+            <div class="insight-card wide-card" id="lora-insight"></div>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
+  <script src="techniques.js" defer></script>
 </body>
 </html>

@@ -55,6 +55,7 @@ function hideTip() {
 // ─── BOOT ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   model = new TransformerModel();
+  window.model = model;   // expose for techniques.js
   initTooltip();
   buildPalette();
   buildPresets();
