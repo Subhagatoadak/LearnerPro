@@ -230,7 +230,6 @@ class TransformerModel {
       output: firstBlock.output,
     };
   }
-}
 
   // Next-word prediction: project final contextual vectors → vocab distribution
   predict(finalOutput) {
