@@ -277,13 +277,57 @@ function kvRender() {
     vis.appendChild(attnDiv);
   }
 
+  // ── Animated attention weight bars under cache ─────────────
+  if (n > 1) {
+    const attnWeightDiv = document.createElement('div');
+    attnWeightDiv.className = 'kv-attn-weights';
+    attnWeightDiv.innerHTML = '<p style="margin:10px 0 6px;font-size:0.82rem;color:#97afbb">Attention weights from new token to cached tokens (softmax):</p>';
+
+    // Fake softmax weights for demo
+    const rawRng = mulberry32kv(n * 31 + 7);
+    const rawScores = Array.from({ length: n }, () => (rawRng() * 3 - 1));
+    const maxS = Math.max(...rawScores);
+    const expS = rawScores.map(s => Math.exp(s - maxS));
+    const sumE = expS.reduce((a, b) => a + b, 0);
+    const weights = expS.map(e => e / sumE);
+
+    const W = attnWeightDiv.clientWidth || 420;
+    const barH = 18, gap = 4, padL = 50, padR = 55, padT = 4;
+    const H = padT + n * (barH + gap);
+    const xS = d3.scaleLinear().domain([0, Math.max(...weights)]).range([padL, (W || 420) - padR]);
+
+    const svg = d3.select(attnWeightDiv).append('svg')
+      .attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`);
+
+    weights.forEach((w, i) => {
+      const y = padT + i * (barH + gap);
+      svg.append('rect').attr('x', padL).attr('y', y)
+        .attr('width', W - padL - padR).attr('height', barH)
+        .attr('fill', 'rgba(255,255,255,0.03)').attr('rx', 4);
+      svg.append('rect').attr('x', padL).attr('y', y)
+        .attr('width', 0).attr('height', barH)
+        .attr('fill', i === n - 1 ? '#60d7ff' : '#8ef2ca').attr('rx', 4).attr('opacity', 0.8)
+        .transition().duration(450).delay(i * 60).attr('width', xS(w) - padL);
+      svg.append('text').attr('x', padL - 6).attr('y', y + barH / 2)
+        .attr('text-anchor', 'end').attr('dominant-baseline', 'middle')
+        .attr('fill', '#97afbb').attr('font-size', 10)
+        .attr('font-family', 'Space Grotesk, sans-serif').text(tokens[i]);
+      svg.append('text').attr('x', xS(w) + 5).attr('y', y + barH / 2)
+        .attr('dominant-baseline', 'middle').attr('fill', '#f4d8ab')
+        .attr('font-size', 9).attr('font-family', 'IBM Plex Mono, monospace')
+        .text(w.toFixed(3));
+    });
+
+    vis.appendChild(attnWeightDiv);
+  }
+
+  // ── Attention output panel ─────────────────────────────────
+  renderKvAttnOutput(n, tokens);
+
   // FLOPs chart
   renderKvFlops(n, maxLen);
 
   // Insight
-  const saved = n > 1 ? ((n - 1) * 2 * 4) : 0; // K+V recomputation saved
-  const naive = n > 0 ? n * n * 4 * 2 : 0;      // naive: every step re-computes all K,V
-  const cached = n > 0 ? n * 4 * 2 + (n - 1) * 2 * 4 : 0; // only new K,V computed each step
   document.getElementById('kv-insight').innerHTML = techInsight([
     {
       title: `Step ${n}: "${n > 0 ? tokens[n - 1] : '—'}" generated`,
@@ -292,24 +336,99 @@ function kvRender() {
         ${techMetric('New K,V computed', n > 0 ? 1 : 0)}
         ${techMetric('K,V reused', Math.max(0, n - 1))}
         ${techMetric('Attention ops', `${n} dot products`)}
+        ${techMetric('FLOPs this step (cached)', `${n * 2 * 4 * 2}`)}
+        ${techMetric('FLOPs this step (naive)', `${n * n * 4 * 2}`)}
       </div>`
     },
     {
       title: 'Cumulative compute comparison',
       body: `<div class="metric-grid">
-        ${techMetric('Naive (no cache)', `${n * (n + 1) / 2} × 2·d matmuls`)}
-        ${techMetric('With KV cache', `${n} × 2·d matmuls`)}
+        ${techMetric('Total steps', n)}
+        ${techMetric('Naive total', `${Math.round(n * (n + 1) / 2)} matmuls`)}
+        ${techMetric('Cached total', `${n} matmuls`)}
         ${techMetric('FLOPs saved', n > 1 ? `${(((n * (n + 1) / 2 - n) / (n * (n + 1) / 2)) * 100).toFixed(0)}%` : '0%')}
       </div>`
     },
     {
-      title: 'Memory cost',
-      body: `<p>Cache stores <strong>${n} × 2 × d_head × n_heads</strong> = <strong>${n * 2 * 4 * 2} floats</strong> per layer.
-             For real models (e.g. GPT-3: 96 layers, d_head=128, n_heads=96) the KV cache
-             can exceed <strong>several GB</strong> for long contexts — the main bottleneck for
-             large-batch inference.</p>`
+      title: 'Memory cost of the cache',
+      body: `<p>Cache = <strong>${n} × 2 × d_head × n_heads</strong> = <strong>${n * 2 * 4 * 2} floats</strong> per layer.
+             GPT-3 (96 layers, d_head=128, n_heads=96, context 2048):
+             <strong>96 × 2048 × 2 × 128 × 96 × 2 bytes ≈ 9.4 GB</strong> — the primary
+             bottleneck for inference at scale.</p>`
+    },
+    {
+      title: '✅ Why you always want KV cache on',
+      body: `<ul>
+               <li>Each generation step is O(N) not O(N²) in attention compute</li>
+               <li>Cache persists across the entire conversation/context</li>
+               <li>Enables 10-100× higher throughput in serving</li>
+             </ul>`
     },
   ]);
+}
+
+function renderKvAttnOutput(n, tokens) {
+  const container = document.getElementById('kv-attn-output');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (n < 1) {
+    container.innerHTML = '<p style="color:#6a8a9a;font-size:0.85rem">Generate tokens to see output vectors.</p>';
+    return;
+  }
+
+  const header = document.createElement('p');
+  header.style.cssText = 'margin:0 0 8px;font-size:0.82rem;color:#97afbb';
+  header.textContent = 'Weighted sum output (context vector) for new token:';
+  container.appendChild(header);
+
+  // Generate fake output vector using the RNG
+  const rng = mulberry32kv(n * 17 + 3);
+  const outVec = Array.from({ length: 4 }, () => (rng() * 2 - 1));
+  const maxAbs = Math.max(...outVec.map(Math.abs), 1e-6);
+
+  const row = document.createElement('div');
+  row.className = 'kv-attn-out-row';
+
+  const vecRow = document.createElement('div');
+  vecRow.className = 'kv-attn-vec';
+
+  const lbl = document.createElement('span');
+  lbl.className = 'kv-attn-vec-label';
+  lbl.textContent = n > 0 ? `"${tokens[n-1]}"` : 'out';
+  vecRow.appendChild(lbl);
+
+  const cells = document.createElement('div');
+  cells.className = 'kv-vec-cells';
+
+  outVec.forEach((v, i) => {
+    const t = (v + maxAbs) / (2 * maxAbs);
+    const r = Math.round(14 + (1 - t) * 40);
+    const g = Math.round(50 + t * 100);
+    const b = Math.round(99 + t * 156);
+    const cell = document.createElement('div');
+    cell.className = 'kv-vec-cell';
+    cell.style.background = `rgb(${r},${g},${b})`;
+    cell.textContent = v.toFixed(2);
+    cell.style.opacity = '0';
+    cell.style.transform = 'scale(0.6)';
+    cell.style.transition = `all 350ms ease ${i * 80}ms`;
+    cells.appendChild(cell);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      cell.style.opacity = '1';
+      cell.style.transform = 'scale(1)';
+    }));
+  });
+
+  vecRow.appendChild(cells);
+  row.appendChild(vecRow);
+
+  const note = document.createElement('p');
+  note.style.cssText = 'margin:8px 0 0;font-size:0.8rem;color:#6a8a9a;font-family:IBM Plex Mono,monospace';
+  note.textContent = `= Σ attn[i] × V[i]  (${n} cached values)`;
+  row.appendChild(note);
+
+  container.appendChild(row);
 }
 
 function mulberry32kv(seed) {
@@ -327,11 +446,11 @@ function renderKvFlops(current, total) {
   container.innerHTML = '';
 
   const steps = Array.from({ length: total }, (_, i) => i + 1);
-  const naive  = steps.map(n => n);           // recompute all K,V: cost ∝ n
-  const cached = steps.map(() => 1);          // always 1 new K,V
+  const naive  = steps.map(n => n);
+  const cached = steps.map(() => 1);
 
   const W = Math.max(260, container.clientWidth || 320);
-  const H = 160;
+  const H = 180;
   const padL = 42, padR = 20, padT = 14, padB = 32;
   const svg = d3.select(container).append('svg').attr('width', W).attr('height', H);
 
@@ -348,30 +467,67 @@ function renderKvFlops(current, total) {
       .attr('fill', '#6a8a9a').attr('font-size', 9).attr('font-family', 'IBM Plex Mono').text(v);
   });
 
-  // naive line (red-orange)
-  const naiveLine = d3.line().x((d, i) => xS(i + 1)).y(d => yS(d)).curve(d3.curveMonotoneX);
+  // Shaded area under naive curve (cost difference = savings)
+  const naiveArea = d3.area()
+    .x((d, i) => xS(i + 1)).y0(yS(1)).y1(d => yS(d)).curve(d3.curveMonotoneX);
   svg.append('path').datum(naive)
-    .attr('fill', 'none').attr('stroke', '#ff8f4d').attr('stroke-width', 2)
-    .attr('d', naiveLine).attr('opacity', 0.75);
+    .attr('fill', 'rgba(255,143,77,0.12)').attr('d', naiveArea);
 
-  // cached line (cyan)
+  // naive line
+  const naiveLine = d3.line().x((d, i) => xS(i + 1)).y(d => yS(d)).curve(d3.curveMonotoneX);
+  const naivePath = svg.append('path').datum(naive)
+    .attr('fill', 'none').attr('stroke', '#ff8f4d').attr('stroke-width', 2.5)
+    .attr('d', naiveLine);
+  const naiveLen = naivePath.node().getTotalLength?.() ?? 200;
+  naivePath.attr('stroke-dasharray', naiveLen).attr('stroke-dashoffset', naiveLen)
+    .transition().duration(700).ease(d3.easeCubicOut).attr('stroke-dashoffset', 0);
+
+  // cached line
   const cacheLine = d3.line().x((d, i) => xS(i + 1)).y(d => yS(d)).curve(d3.curveMonotoneX);
   svg.append('path').datum(cached)
-    .attr('fill', 'none').attr('stroke', '#60d7ff').attr('stroke-width', 2)
-    .attr('d', cacheLine).attr('opacity', 0.75);
+    .attr('fill', 'none').attr('stroke', '#60d7ff').attr('stroke-width', 2.5)
+    .attr('d', cacheLine).attr('opacity', 0.85);
 
-  // current position marker
+  // Savings label in the shaded area
+  if (total > 2) {
+    const midX = xS(Math.round(total / 2));
+    const midNaive = naive[Math.round(total / 2) - 1];
+    svg.append('text').attr('x', midX).attr('y', yS((midNaive + 1) / 2))
+      .attr('text-anchor', 'middle').attr('fill', 'rgba(255,143,77,0.7)')
+      .attr('font-size', 9).attr('font-family', 'IBM Plex Mono,monospace')
+      .text('wasted work ↑');
+  }
+
+  // current position animated markers
   if (current > 0) {
-    svg.append('circle').attr('cx', xS(current)).attr('cy', yS(naive[current - 1]))
-      .attr('r', 5).attr('fill', '#ff8f4d');
-    svg.append('circle').attr('cx', xS(current)).attr('cy', yS(1))
-      .attr('r', 5).attr('fill', '#60d7ff');
+    // Pulsing circles at current step
+    const cx = xS(current);
+    [{ cy: yS(naive[current - 1]), fill: '#ff8f4d' }, { cy: yS(1), fill: '#60d7ff' }].forEach(m => {
+      svg.append('circle').attr('cx', cx).attr('cy', m.cy).attr('r', 12)
+        .attr('fill', m.fill).attr('opacity', 0).attr('stroke', 'none')
+        .transition().duration(600).attr('r', 20).attr('opacity', 0.1);
+      svg.append('circle').attr('cx', cx).attr('cy', m.cy).attr('r', 5)
+        .attr('fill', m.fill).attr('stroke', 'white').attr('stroke-width', 1.5);
+    });
+
+    // Vertical step line
+    svg.append('line').attr('x1', cx).attr('x2', cx)
+      .attr('y1', yS(naive[current - 1])).attr('y2', yS(1))
+      .attr('stroke', 'rgba(255,255,255,0.15)').attr('stroke-width', 1).attr('stroke-dasharray', '3,3');
+
+    // Savings annotation
+    const savedPct = current > 1
+      ? (((current * (current + 1) / 2 - current) / (current * (current + 1) / 2)) * 100).toFixed(0) + '% saved'
+      : '0% saved';
+    svg.append('text').attr('x', cx + 8).attr('y', yS((naive[current - 1] + 1) / 2))
+      .attr('fill', '#8ef2ca').attr('font-size', 10).attr('font-family', 'IBM Plex Mono,monospace')
+      .text(savedPct);
   }
 
   // axis labels
   svg.append('text').attr('x', W - padR).attr('y', yS(naive[total - 1]) - 8)
     .attr('fill', '#ff8f4d').attr('font-size', 10).attr('text-anchor', 'end').text('Naive');
-  svg.append('text').attr('x', W - padR).attr('y', yS(1) - 8)
+  svg.append('text').attr('x', W - padR).attr('y', yS(1) + 14)
     .attr('fill', '#60d7ff').attr('font-size', 10).attr('text-anchor', 'end').text('Cached');
 
   svg.append('text').attr('x', (padL + W - padR) / 2).attr('y', H - 4)

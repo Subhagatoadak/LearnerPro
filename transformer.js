@@ -111,6 +111,10 @@ class TransformerModel {
       b2: Array.from({ length: D_MODEL }, () => rng(0.1)),
     }));
 
+    // Language-model head: project d_model → vocab_size for next-word prediction
+    this.lmHead   = M.rand(D_MODEL, VOCAB.length, rng, Math.sqrt(2 / (D_MODEL + VOCAB.length)));
+    this.vocabList = [...VOCAB];
+
     // Backwards compatibility for the first block, used by the techniques page.
     this.WQ = this.blocks[0].WQ;
     this.WK = this.blocks[0].WK;
@@ -225,6 +229,15 @@ class TransformerModel {
       ffn2: firstBlock.ffn2,
       output: firstBlock.output,
     };
+  }
+}
+
+  // Next-word prediction: project final contextual vectors → vocab distribution
+  predict(finalOutput) {
+    // finalOutput: seq × d_model  →  logits: seq × vocab_size
+    const logits = M.mul(finalOutput, this.lmHead);
+    const probs  = M.rowSoftmax(logits);
+    return { logits, probs };
   }
 }
 

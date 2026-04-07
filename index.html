@@ -25,6 +25,8 @@
     <div class="bg-orb orb-b"></div>
     <div class="bg-grid"></div>
 
+    <canvas id="particles-canvas" aria-hidden="true"></canvas>
+
     <header class="hero">
       <div class="hero-copy">
         <p class="eyebrow">GitHub Pages Transformer Explainer</p>
@@ -203,6 +205,7 @@
           <button class="arch-node" data-target="step-addnorm1" type="button">4. Add + Norm</button>
           <button class="arch-node" data-target="step-ffn" type="button">5. Feed Forward</button>
           <button class="arch-node" data-target="step-output" type="button">6. Final Context</button>
+          <button class="arch-node" data-target="step-predict" type="button">7. Prediction</button>
         </div>
       </section>
 
@@ -645,6 +648,62 @@
             <div class="insight-card" id="calc-output"></div>
           </div>
         </article>
+        <!-- ── STEP 7: NEXT-WORD PREDICTION ─────────────────── -->
+        <article id="step-predict" class="step-card predict-card">
+          <div class="step-heading">
+            <div>
+              <p class="step-index">Step 07</p>
+              <h2>Next-Word Prediction</h2>
+            </div>
+            <p class="step-copy">
+              A linear "LM head" projects each token's final vector onto the vocabulary,
+              then softmax turns the scores into probabilities. The highest-probability
+              token is the model's predicted next word.
+            </p>
+          </div>
+          <div class="formula-strip">
+            logits = finalOutput · W<sub>lm</sub> &nbsp;|&nbsp; P(word) = softmax(logits) &nbsp;|&nbsp; next = argmax P
+          </div>
+
+          <div class="predict-controls">
+            <label class="ctrl-label">Predicting after token:</label>
+            <select id="predict-focus-select" class="field select"></select>
+            <button class="anim-btn" id="predict-animate" type="button">▶ Animate sampling</button>
+            <span class="mini-badge warm" id="predict-winner">—</span>
+          </div>
+
+          <div class="step-grid">
+            <div class="viz-card wide-card">
+              <div class="card-heading">
+                <h3>Top-10 next-word probabilities</h3>
+                <span class="mini-badge" id="predict-entropy-badge"></span>
+              </div>
+              <div id="predict-bars"></div>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>LM head projection</h3>
+                <span class="mat-dim" id="predict-lm-dim"></span>
+              </div>
+              <canvas id="canvas-lm-head"></canvas>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading">
+                <h3>Logits → softmax</h3>
+                <span id="predict-logit-label" class="mini-badge"></span>
+              </div>
+              <div id="predict-logit-bars"></div>
+            </div>
+            <div class="insight-card" id="calc-predict"></div>
+            <div class="viz-card wide-card">
+              <div class="card-heading">
+                <h3>All-token prediction grid</h3>
+                <span>each row = probability distribution for one token position</span>
+              </div>
+              <canvas id="canvas-predict-grid"></canvas>
+            </div>
+          </div>
+        </article>
       </section>
 
       <!-- ═══════════════════════════════════════════════════════
@@ -709,6 +768,12 @@
             </div>
           </div>
 
+          <div class="benefit-strip">
+            <div class="benefit-chip">⚡ Up to N× faster generation</div>
+            <div class="benefit-chip">💾 O(N·d) memory vs O(N²·d) recompute</div>
+            <div class="benefit-chip">✅ Used in every production LLM</div>
+          </div>
+
           <div class="tech-grid">
             <div class="viz-card wide-card">
               <div class="card-heading">
@@ -718,7 +783,11 @@
               <div id="kv-cache-vis"></div>
             </div>
             <div class="viz-card">
-              <div class="card-heading"><h3>FLOPs: no cache vs cached</h3></div>
+              <div class="card-heading"><h3>Attention output (cached)</h3></div>
+              <div id="kv-attn-output"></div>
+            </div>
+            <div class="viz-card">
+              <div class="card-heading"><h3>FLOPs: naive vs cached</h3></div>
               <div id="kv-flops-chart"></div>
             </div>
             <div class="insight-card">
@@ -760,6 +829,12 @@
                 </div>
               </div>
             </div>
+          </div>
+
+          <div class="benefit-strip">
+            <div class="benefit-chip">📦 Student can be 10-100× smaller</div>
+            <div class="benefit-chip">🎯 Near teacher accuracy on downstream tasks</div>
+            <div class="benefit-chip">💡 "Dark knowledge" improves generalisation</div>
           </div>
 
           <div class="tech-grid">
@@ -818,6 +893,12 @@
             </div>
           </div>
 
+          <div class="benefit-strip">
+            <div class="benefit-chip">🗜 2-8× memory reduction</div>
+            <div class="benefit-chip">⚡ Faster matrix multiply on int hardware</div>
+            <div class="benefit-chip">📉 &lt;1% accuracy loss at INT8</div>
+          </div>
+
           <div class="tech-grid">
             <div class="viz-card">
               <div class="card-heading"><h3>Original weights (FP32)</h3><span class="mat-dim" id="quant-orig-dim"></span></div>
@@ -874,6 +955,12 @@
                 <button class="anim-btn" id="lora-randomize" type="button">🎲 New A,B</button>
               </div>
             </div>
+          </div>
+
+          <div class="benefit-strip">
+            <div class="benefit-chip">🔒 Freeze 99%+ of weights</div>
+            <div class="benefit-chip">💾 Adapter checkpoint = megabytes not gigabytes</div>
+            <div class="benefit-chip">🔁 Swap adapters at runtime — one base model</div>
           </div>
 
           <div class="tech-grid">
